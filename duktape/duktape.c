@@ -6919,20 +6919,24 @@ DUK_INTERNAL_DECL void duk_hobject_assert_valid(duk_hobject *h);
 	} while (0)
 #endif
 
+/* Empty property allocations have a NULL base; even adding zero is undefined. */
+#define DUK_HOBJECT_GET_PROPS_OFFSET(heap, h, offset) \
+	(DUK_HOBJECT_GET_PROPS((heap), (h)) != NULL ? DUK_HOBJECT_GET_PROPS((heap), (h)) + (offset) : NULL)
+
 #if defined(DUK_USE_HOBJECT_LAYOUT_1)
 /* LAYOUT 1 */
 #define DUK_HOBJECT_E_GET_KEY_BASE(heap, h) ((duk_hstring **) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h))))
 #define DUK_HOBJECT_E_GET_VALUE_BASE(heap, h) \
-	((duk_propvalue *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_hstring *)))
+	((duk_propvalue *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_hstring *)))
 #define DUK_HOBJECT_E_GET_FLAGS_BASE(heap, h) \
-	((duk_uint8_t *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_uint8_t *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                           DUK_HOBJECT_GET_ESIZE((h)) * (sizeof(duk_hstring *) + sizeof(duk_propvalue))))
 #define DUK_HOBJECT_A_GET_BASE(heap, h) \
-	((duk_tval *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_tval *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                        DUK_HOBJECT_GET_ESIZE((h)) * \
 	                            (sizeof(duk_hstring *) + sizeof(duk_propvalue) + sizeof(duk_uint8_t))))
 #define DUK_HOBJECT_H_GET_BASE(heap, h) \
-	((duk_uint32_t *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_uint32_t *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                            DUK_HOBJECT_GET_ESIZE((h)) * \
 	                                (sizeof(duk_hstring *) + sizeof(duk_propvalue) + sizeof(duk_uint8_t)) + \
 	                            DUK_HOBJECT_GET_ASIZE((h)) * sizeof(duk_tval)))
@@ -6959,18 +6963,18 @@ DUK_INTERNAL_DECL void duk_hobject_assert_valid(duk_hobject *h);
 #error invalid DUK_USE_ALIGN_BY
 #endif
 #define DUK_HOBJECT_E_GET_KEY_BASE(heap, h) \
-	((duk_hstring **) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_propvalue)))
+	((duk_hstring **) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_propvalue)))
 #define DUK_HOBJECT_E_GET_VALUE_BASE(heap, h) ((duk_propvalue *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h))))
 #define DUK_HOBJECT_E_GET_FLAGS_BASE(heap, h) \
-	((duk_uint8_t *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_uint8_t *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                           DUK_HOBJECT_GET_ESIZE((h)) * (sizeof(duk_hstring *) + sizeof(duk_propvalue))))
 #define DUK_HOBJECT_A_GET_BASE(heap, h) \
-	((duk_tval *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_tval *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                        DUK_HOBJECT_GET_ESIZE((h)) * \
 	                            (sizeof(duk_hstring *) + sizeof(duk_propvalue) + sizeof(duk_uint8_t)) + \
 	                        DUK_HOBJECT_E_FLAG_PADDING(DUK_HOBJECT_GET_ESIZE((h)))))
 #define DUK_HOBJECT_H_GET_BASE(heap, h) \
-	((duk_uint32_t *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_uint32_t *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                            DUK_HOBJECT_GET_ESIZE((h)) * \
 	                                (sizeof(duk_hstring *) + sizeof(duk_propvalue) + sizeof(duk_uint8_t)) + \
 	                            DUK_HOBJECT_E_FLAG_PADDING(DUK_HOBJECT_GET_ESIZE((h))) + \
@@ -6990,18 +6994,18 @@ DUK_INTERNAL_DECL void duk_hobject_assert_valid(duk_hobject *h);
 #elif defined(DUK_USE_HOBJECT_LAYOUT_3)
 /* LAYOUT 3 */
 #define DUK_HOBJECT_E_GET_KEY_BASE(heap, h) \
-	((duk_hstring **) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_propvalue) + \
+	((duk_hstring **) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_propvalue) + \
 	                            DUK_HOBJECT_GET_ASIZE((h)) * sizeof(duk_tval)))
 #define DUK_HOBJECT_E_GET_VALUE_BASE(heap, h) ((duk_propvalue *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h))))
 #define DUK_HOBJECT_E_GET_FLAGS_BASE(heap, h) \
-	((duk_uint8_t *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_uint8_t *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                           DUK_HOBJECT_GET_ESIZE((h)) * (sizeof(duk_propvalue) + sizeof(duk_hstring *)) + \
 	                           DUK_HOBJECT_GET_ASIZE((h)) * sizeof(duk_tval) + \
 	                           DUK_HOBJECT_GET_HSIZE((h)) * sizeof(duk_uint32_t)))
 #define DUK_HOBJECT_A_GET_BASE(heap, h) \
-	((duk_tval *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_propvalue)))
+	((duk_tval *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), DUK_HOBJECT_GET_ESIZE((h)) * sizeof(duk_propvalue)))
 #define DUK_HOBJECT_H_GET_BASE(heap, h) \
-	((duk_uint32_t *) (void *) (DUK_HOBJECT_GET_PROPS((heap), (h)) + \
+	((duk_uint32_t *) (void *) DUK_HOBJECT_GET_PROPS_OFFSET((heap), (h), \
 	                            DUK_HOBJECT_GET_ESIZE((h)) * (sizeof(duk_propvalue) + sizeof(duk_hstring *)) + \
 	                            DUK_HOBJECT_GET_ASIZE((h)) * sizeof(duk_tval)))
 #define DUK_HOBJECT_P_COMPUTE_SIZE(n_ent, n_arr, n_hash) \
@@ -58828,15 +58832,23 @@ DUK_INTERNAL void duk_hobject_realloc_props(duk_hthread *thr,
 	/* Set up pointers to the new property area: this is hidden behind a macro
 	 * because it is memory layout specific.
 	 */
-	DUK_HOBJECT_P_SET_REALLOC_PTRS(new_p,
-	                               new_e_k,
-	                               new_e_pv,
-	                               new_e_f,
-	                               new_a,
-	                               new_h,
-	                               new_e_size_adjusted,
-	                               new_a_size,
-	                               new_h_size);
+	if (new_p != NULL) {
+		DUK_HOBJECT_P_SET_REALLOC_PTRS(new_p,
+		                               new_e_k,
+		                               new_e_pv,
+		                               new_e_f,
+		                               new_a,
+		                               new_h,
+		                               new_e_size_adjusted,
+		                               new_a_size,
+		                               new_h_size);
+	} else {
+		new_e_k = NULL;
+		new_e_pv = NULL;
+		new_e_f = NULL;
+		new_a = NULL;
+		new_h = NULL;
+	}
 	DUK_UNREF(new_h); /* happens when hash part dropped */
 	new_e_next = 0;
 
@@ -71883,10 +71895,10 @@ DUK_LOCAL void duk__add_label(duk_compiler_ctx *comp_ctx, duk_hstring *h_label, 
 
 	p = (duk_uint8_t *) DUK_HBUFFER_DYNAMIC_GET_DATA_PTR(thr->heap, comp_ctx->curr_func.h_labelinfos);
 	li_start = (duk_labelinfo *) (void *) p;
-	li = (duk_labelinfo *) (void *) (p + DUK_HBUFFER_GET_SIZE(comp_ctx->curr_func.h_labelinfos));
-	n = (duk_size_t) (li - li_start);
+	n = DUK_HBUFFER_GET_SIZE(comp_ctx->curr_func.h_labelinfos) / sizeof(duk_labelinfo);
+	li = n != 0 ? li_start + n : li_start;
 
-	while (li > li_start) {
+	while (li != li_start) {
 		li--;
 
 		if (li->h_label == h_label && h_label != DUK_HTHREAD_STRING_EMPTY_STRING(thr)) {
@@ -100334,14 +100346,12 @@ DUK_LOCAL void duk__bw_update_ptrs(duk_hthread *thr, duk_bufwriter_ctx *bw_ctx, 
 	DUK_ASSERT(bw_ctx != NULL);
 	DUK_UNREF(thr);
 
-	/* 'p' might be NULL when the underlying buffer is zero size.  If so,
-	 * the resulting pointers are not used unsafely.
-	 */
+	/* A zero-size buffer may have a NULL base; preserve it without arithmetic. */
 	p = (duk_uint8_t *) DUK_HBUFFER_DYNAMIC_GET_DATA_PTR(thr->heap, bw_ctx->buf);
 	DUK_ASSERT(p != NULL || (DUK_HBUFFER_DYNAMIC_GET_SIZE(bw_ctx->buf) == 0 && curr_offset == 0 && new_length == 0));
-	bw_ctx->p = p + curr_offset;
+	bw_ctx->p = p != NULL ? p + curr_offset : NULL;
 	bw_ctx->p_base = p;
-	bw_ctx->p_limit = p + new_length;
+	bw_ctx->p_limit = p != NULL ? p + new_length : NULL;
 }
 
 DUK_INTERNAL void duk_bw_init(duk_hthread *thr, duk_bufwriter_ctx *bw_ctx, duk_hbuffer_dynamic *h_buf) {

@@ -130,8 +130,28 @@ static void test_pac_errors(void) {
         parent_free(); pac_cleanup(); pac_cleanup();
     }
 }
+static void test_pac_empty_storage(void) {
+    const char *script =
+        "function FindProxyForURL(u,h) {"
+        "  var object = Object.create(null), array = [];"
+        "  if ('missing' in object || Object.keys(object).length) return 'PROXY bad';"
+        "  object.proxy = 'DIRECT'; delete object.proxy;"
+        "  array.push('DIRECT'); array.length = 0;"
+        "  Object.seal(object); Object.freeze(array);"
+        "  once: for (var i = 0; i < 1; i++) { break once; }"
+        "  return JSON.stringify(object) === '{}' && JSON.stringify(array) === '[]'"
+        "    ? 'DIRECT' : 'PROXY bad';"
+        "}";
+    for (int i = 0; i < 4; ++i) {
+        CHECK(pac_init());
+        CHECK(pac_parse_string(script));
+        const char *result = pac_find_proxy("http://target.test/", "target.test");
+        CHECK(result && !strcmp(result, "DIRECT"));
+        pac_cleanup();
+    }
+}
 int main(void) {
-    test_des_vector(); test_challenge_bounds(); test_configuration(); test_parent_reset(); test_pac_errors();
+    test_des_vector(); test_challenge_bounds(); test_configuration(); test_parent_reset(); test_pac_errors(); test_pac_empty_storage();
     puts("cntlm embedded core regressions passed");
     return 0;
 }

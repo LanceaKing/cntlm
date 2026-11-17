@@ -188,6 +188,28 @@ compilers might work for you (then again, they might not). Specific
 Makefiles for different compilers are supported by the ./configure script
 (e.g. Makefile.xlc)
 
+## Embedded core regression tests
+
+This repository's `Embedded core tests` workflow runs the embedded NTLM,
+configuration and PAC regressions with GCC and Clang under ASan and UBSan.
+The PAC cases cover empty objects and arrays, property deletion, JavaScript
+labels and repeated initialization/cleanup. To run the same checks locally:
+
+```sh
+cmake -S . -B build-core-clang -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang -DCNTLM_BUILD_TESTS=ON \
+  -DCMAKE_C_FLAGS="-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+cmake --build build-core-clang
+ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
+  UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  ctest --test-dir build-core-clang --output-on-failure
+```
+
+Use `gcc` and a separate `build-core-gcc` directory for the GCC build.
+Redsocks transport/integration checks live in the redsocks repository;
+Android/JNI/APK checks live in ProxyDroid.
+
 ## Contact
 
 This is a fork of the original cntlm code. For issues, discussion, PRs, and so on, visit <https://github.com/versat/cntlm>.
