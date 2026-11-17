@@ -1,0 +1,10 @@
+/* Generated for the portable embedded target. */
+#cmakedefine01 config_socklen_t
+#cmakedefine01 config_gethostname
+#cmakedefine01 config_strdup
+#cmakedefine01 config_arc4random_buf
+#cmakedefine01 config_strlcpy
+#cmakedefine01 config_strlcat
+#cmakedefine01 config_memset_s
+#cmakedefine01 config_gss
+#cmakedefine01 config_endian

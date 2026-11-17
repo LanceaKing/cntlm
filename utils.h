@@ -28,7 +28,7 @@
 #include <pthread.h>
 #include <netinet/in.h>
 
-#include "config/config.h"
+#include <config/config.h>
 
 #define BUFSIZE			4096
 #define MINIBUF_SIZE		64
@@ -39,7 +39,8 @@
 */
 #define PASSWORD_BUFSIZE	257
 #define HOST_BUFSIZE	260
-#define VAL(var, type, offset)	*((type *)(var+offset))
+#define VAL(var, type, offset) \
+	(((struct __attribute__((packed)) { type value; } *)((char *)(var)+(offset)))->value)
 #define MEM(var, type, offset)	(type *)(var+offset)
 
 #if !defined(__FreeBSD__) && !defined(__NetBSD__) && !defined(__OpenBSD__)

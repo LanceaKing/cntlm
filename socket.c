@@ -90,6 +90,14 @@ int so_resolv_wildcard(struct addrinfo **addresses, const int port, int gateway)
  * Returns: socket descriptor
  */
 int so_connect(struct addrinfo *addresses) {
+	return so_connect_named(addresses, NULL);
+}
+
+int so_connect_named(struct addrinfo *addresses, const char *proxy_name) {
+#ifdef CNTLM_EMBEDDED
+	return cntlm_io_connect(addresses, proxy_name);
+#else
+	(void)proxy_name;
 	int fd = -1;
 	int rc;
 	struct addrinfo *p;
@@ -148,6 +156,21 @@ int so_connect(struct addrinfo *addresses) {
 	}
 
 	return fd;
+#endif
+}
+
+/* TCP may fragment every field, including SOCKS5's fixed length fields. */
+ssize_t so_read_exact(int fd, void *buffer, size_t length) {
+	size_t offset = 0;
+	while (offset < length) {
+		ssize_t got = read(fd, (char *)buffer + offset, length - offset);
+		if (got < 0 && errno == EINTR)
+			continue;
+		if (got <= 0)
+			return offset ? (ssize_t)offset : got;
+		offset += got;
+	}
+	return (ssize_t)offset;
 }
 
 /*
@@ -274,6 +297,8 @@ int so_recvln(int fd, char **buf, int *size) {
 		 * End of buffer, still no EOL? Resize the buffer
 		 */
 		if (len == *size-1 && c != '\n') {
+			if (*size >= 65536)
+				return -1;
 			if (debug)
 				printf("so_recvln(%d): realloc %d\n", fd, *size*2);
 			*size *= 2;

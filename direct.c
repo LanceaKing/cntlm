@@ -507,7 +507,7 @@ rr_data_t direct_request(void *cdata, rr_data_const_t request) {
 
 bailout:
 	if (tcreds)
-		free(tcreds);
+		free_auth(tcreds);
 	if (hostname)
 		free(hostname);
 

@@ -28,113 +28,72 @@
 #include "globals.h"
 
 config_t config_open(const char *fname) {
-	config_t rc;
-	FILE *fp;
-	char *buf;
-	char section[MINIBUF_SIZE] = "global";
-	int i;
-	int j;
-	int slen;
-
-	fp = fopen(fname, "r");
+	FILE *fp = fopen(fname, "r");
 	if (!fp)
 		return NULL;
-
-	buf = zmalloc(BUFSIZE);
-	rc = (config_t)zmalloc(sizeof(struct config_s));
-	rc->options = NULL;
-
-	while (!feof(fp)) {
-		int quote = 0;
-		const char *tmp = fgets(buf, BUFSIZE, fp);
-		if (!tmp)
-			break;
-
-		const int len = MIN(BUFSIZE, strlen(buf));
-		if (!len || feof(fp))
+	char *buf = zmalloc(BUFSIZE);
+	config_t cf = zmalloc(sizeof(*cf));
+	char *key = NULL, *value = NULL;
+	while (fgets(buf, BUFSIZE, fp)) {
+		size_t length = strlen(buf), pos = 0, start;
+		if (length == BUFSIZE - 1 && buf[length - 1] != '\n')
+			goto invalid;
+		while (pos < length && isspace((unsigned char)buf[pos])) ++pos;
+		if (pos == length || buf[pos] == '#' || buf[pos] == ';')
 			continue;
-
-		/*
-		 * Find first non-empty character
-		 */
-		for (j = 0; j < len && isspace((u_char)buf[j]); ++j) {};
-
-		/*
-		 * Comment?
-		 */
-		if (j >= len || buf[j] == '#' || buf[j] == ';')
-			continue;
-
-		/*
-		 * Find end of keyword
-		 */
-		for (i = j; j < len && isalnum((u_char)buf[j]); ++j) {};
-
-		/*
-		 * Malformed?
-		 */
-		if (j >= len)
-			continue;
-
-		/*
-		 * Is it a section?
-		 */
-		if (buf[j] == '[') {
-			for (++j; j < len && isspace((u_char)buf[j]); ++j) {};
-			for (slen = j; j < len && j-slen < MINIBUF_SIZE-1 && buf[j] != ']' && !isspace((u_char)buf[j]); ++j) {};
-			if (j-slen > 0) {
-				strlcpy(section, buf+slen, j-slen+1);
-			}
+		if (buf[pos] == '[') {
+			char *end = strchr(buf + pos, ']');
+			if (!end) goto invalid;
+			pos = end - buf + 1;
+			while (pos < length && isspace((unsigned char)buf[pos])) ++pos;
+			if (pos < length && buf[pos] != '#' && buf[pos] != ';') goto invalid;
 			continue;
 		}
-
-		/*
-		 * It's an OK keyword
-		 */
-		char * key = substr(buf, i, j-i);
-
-		/*
-		 * Find next non-empty character
-		 */
-		for (; j < len && isspace((u_char)buf[j]); ++j) {};
-		if (j >= len || buf[j] == '#' || buf[j] == ';') {
-			free(key);
+		start = pos;
+		while (pos < length && isalnum((unsigned char)buf[pos])) ++pos;
+		if (pos == start || pos == length || !isspace((unsigned char)buf[pos]))
+			goto invalid;
+		key = substr(buf, start, pos - start);
+		while (pos < length && isspace((unsigned char)buf[pos])) ++pos;
+		if (pos == length || buf[pos] == '#' || buf[pos] == ';') {
+			free(key); key = NULL;
 			continue;
 		}
-
-		/*
-		 * Is value quoted?
-		 */
-		if (buf[j] == '"') {
-			quote = 1;
-			for (i = ++j; j < len && buf[i] != '"'; ++i) {};
-			if (i >= len) {
-				free(key);
-				continue;
+		if (buf[pos] == '"') {
+			size_t out = 0;
+			int closed = 0;
+			value = zmalloc(length + 1);
+			for (++pos; pos < length; ++pos) {
+				if (buf[pos] == '"') { closed = 1; ++pos; break; }
+				if (buf[pos] == '\\' && pos + 1 < length &&
+				    (buf[pos + 1] == '\\' || buf[pos + 1] == '"')) ++pos;
+				value[out++] = buf[pos];
 			}
-		} else
-			i = len;
-
-		/*
-		 * Get value as quoted or until EOL/comment
-		 */
-		char * value = substr(buf, j, i-j);
-		if (!quote) {
-			i = strcspn(value, "#");
-			if (i != (int)strlen(value))
-				value[i] = 0;
+			value[out] = 0;
+			if (!closed) goto invalid;
+			while (pos < length && isspace((unsigned char)buf[pos])) ++pos;
+			if (pos < length && buf[pos] != '#' && buf[pos] != ';') goto invalid;
+		} else {
+			value = strdup(buf + pos);
+			value[strcspn(value, "#")] = 0;
 			trimr(value);
 		}
-
-		if (debug)
-			printf("section: %s, %s = '%s'\n", section, key, value);
-		rc->options = hlist_add(rc->options, key, value, HLIST_NOALLOC, HLIST_NOALLOC);
+		cf->options = hlist_add(cf->options, key, value, HLIST_NOALLOC, HLIST_NOALLOC);
+		key = value = NULL;
 	}
-
+	if (ferror(fp)) goto invalid;
+	compat_memset_s(buf, BUFSIZE, 0, BUFSIZE);
 	free(buf);
 	fclose(fp);
-
-	return rc;
+	return cf;
+invalid:
+	free(key);
+	if (value) { compat_memset_s(value, strlen(value), 0, strlen(value)); free(value); }
+	compat_memset_s(buf, BUFSIZE, 0, BUFSIZE);
+	free(buf);
+	fclose(fp);
+	config_close(cf);
+	return NULL;
 }
 
 void config_set(config_t cf, char *option, char *value) {
@@ -146,7 +105,9 @@ char *config_pop(config_t cf, const char *option) {
 
 	tmp = hlist_get(cf->options, option);
 	if (tmp) {
-		tmp = strdup(tmp);
+		char *original = tmp;
+		tmp = strdup(original);
+		compat_memset_s(original, strlen(original), 0, strlen(original));
 		cf->options = hlist_del(cf->options, option);
 	}
 
@@ -161,6 +122,8 @@ void config_close(config_t cf) {
 	if (cf == NULL)
 		return;
 
+	for (hlist_t item = cf->options; item; item = item->next)
+		if (item->value) compat_memset_s(item->value, strlen(item->value), 0, strlen(item->value));
 	cf->options = hlist_free(cf->options);
 	free(cf);
 }

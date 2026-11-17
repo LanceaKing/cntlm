@@ -65,6 +65,7 @@ struct auth_s {
 
 extern struct auth_s *copy_auth(struct auth_s *dst, const struct auth_s *src, int fullcopy);
 extern struct auth_s *dup_auth(const struct auth_s *creds, int fullcopy);
+extern void free_auth(struct auth_s *creds);
 extern void dump_auth(const struct auth_s *creds);
 
 #endif /* AUTH_H */

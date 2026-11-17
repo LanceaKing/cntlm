@@ -72,7 +72,6 @@ rr_data_t forward_request(void *thread_data, rr_data_t request) {
 	int i;
 	int loop;
 	int plugin;
-	int retry = 0;
 	int *rsocket[2];
 	int *wsocket[2];
 	rr_data_t data[2] = {NULL, NULL};
@@ -85,7 +84,6 @@ rr_data_t forward_request(void *thread_data, rr_data_t request) {
 	int conn_alive;
 	int authok;
 	int noauth;
-	int was_cached;
 
 	int sd;
 	assert(thread_data != NULL);
@@ -93,15 +91,14 @@ rr_data_t forward_request(void *thread_data, rr_data_t request) {
 	char saddr[INET6_ADDRSTRLEN] = {0};
 	INET_NTOP(&((struct thread_arg_s *)thread_data)->addr, saddr, INET6_ADDRSTRLEN);
 
-beginning:
 	sd = 0;
-	was_cached = noauth = authok = proxy_alive = 0;
+	noauth = authok = proxy_alive = 0;
 
 	rsocket[0] = wsocket[1] = &cd;
 	rsocket[1] = wsocket[0] = &sd;
 
 	if (debug) {
-		printf("Thread processing%s...\n", retry ? " (retry)" : "");
+		printf("Thread processing...\n");
 		pthread_mutex_lock(&connection_mtx);
 		plist_dump(connection_list);
 		pthread_mutex_unlock(&connection_mtx);
@@ -123,7 +120,6 @@ beginning:
 			printf("Found authenticated connection %d!\n", i);
 		sd = i;
 		authok = 1;
-		was_cached = 1;
 	} else {
 		tcreds = zmalloc(sizeof(struct auth_s));
 		sd = proxy_connect(tcreds, request->url, request->hostname);
@@ -160,28 +156,21 @@ beginning:
 		 *   - read proxy response
 		 *   - forward it to the client with HTTP body, if present
 		 *
-		 * There is one goto to "beginning":
-		 *   - jump here to retry request (when cached connection timed out
-		 *     or we thought proxy was notauth, but got 407)
-		 *
 		 * During 1st iter. of inner loop (loop == 0), when we detect
 		 * that auth isn't required by proxy, we set loop = 1 and
 		 * the reply to our auth attempt (containing valid response) is sent to
 		 * client directly without us making a request a second time.
 		 */
 		if (request) {
-			if (retry)
-				data[0] = request;				// Got from inside the loop = retry (must free ourselves)
-			else
-				data[0] = dup_rr_data(request);			// Got from caller (make a dup, caller will free)
+			data[0] = dup_rr_data(request); /* caller retains its request */
 			request = NULL;						// Next time, just alloc empty structure
 		} else {
 			data[0] = new_rr_data();
 		}
 		data[1] = new_rr_data();
 
-		retry = 0;
-		proxy_alive = 0;
+		/* Keep the previous response's cache eligibility while waiting for
+		 * another client header. EOF here must not discard an idle auth'd stream. */
 		conn_alive = 0;
 		loop = 0; // 0 = request from client; 1 = response from server
 
@@ -327,21 +316,14 @@ beginning:
 			}
 
 			/*
-			 * Is final reply from proxy still 407 denied? If this is a cached
-			 * connection or we thought proxy was noauth (so we didn't auth), make a new
-			 * connect and try to auth.
+			 * A final 407 is returned to the client without replaying the request.
 			 */
-			if (loop == 1 && data[1]->code == 407 && (was_cached || noauth)) {
-				if (debug)
-					printf("\nFinal reply is 407 - retrying (cached=%d, noauth=%d).\n", was_cached, noauth);
-				if (tcreds)
-					free(tcreds);
-
-				retry = 1;
-				request = data[0];
-				free_rr_data(&data[1]);
-				close(sd);
-				goto beginning;
+			if (loop == 1 && data[1]->code == 407) {
+				/* The request has already been submitted: return the failure without
+				 * replaying a potentially non-idempotent method/body. */
+				authok = 0;
+				data[1]->headers = hlist_mod(data[1]->headers, "Connection", "close", 1);
+				data[1]->headers = hlist_mod(data[1]->headers, "Proxy-Connection", "close", 1);
 			}
 
 			/*
@@ -404,6 +386,9 @@ beginning:
 				 * might have by now prepared 1st and 2nd auth steps and filled our headers with
 				 * the 3rd, final, NTLM message.
 				 */
+				/* Once a request is submitted, the stream cannot be cached until
+				 * its complete response explicitly allows keep-alive again. */
+				if (loop == 0) proxy_alive = 0;
 				if (!headers_send(*wsocket[loop], data[loop])) {
 					free_rr_data(&data[0]);
 					free_rr_data(&data[1]);
@@ -486,7 +471,7 @@ bailout:
 		connection_list = plist_add(connection_list, sd, (void *)tcreds);
 		pthread_mutex_unlock(&connection_mtx);
 	} else {
-		free(tcreds);
+		free_auth(tcreds);
 		if (sd >= 0) {
 			close(sd);
 		}
@@ -617,7 +602,7 @@ bailout:
 	if (sd != -2) {
 		close(cd);
 	}
-	free(tcreds);
+	free_auth(tcreds);
 	free(hostname);
 
 	return sd;
@@ -661,7 +646,7 @@ void magic_auth_detect(const char *url) {
 		host = substr(pos+3, 0, tmp ? tmp-pos-3 : 0);
 	} else {
 		fprintf(stderr, "Invalid URL (%s)\n", url);
-		free(tcreds);
+		free_auth(tcreds);
 		return;
 	}
 

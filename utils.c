@@ -19,7 +19,8 @@
  *
  */
 
-#include "config/config.h"
+#include <config/config.h>
+#include "auth.h"
 
 #if config_memset_s == 1
 #define __STDC_WANT_LIB_EXT1__ 1
@@ -53,10 +54,15 @@ static const int hexindex[128] = {-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-
 	-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1};
 
 void myexit(int rc) {
+#ifdef CNTLM_EMBEDDED
+	(void)rc;
+	cntlm_embed_fatal();
+#else
 	if (rc)
 		fprintf(stderr, "Exiting with error. Check daemon logs or run with -v.\n");
 
 	exit(rc);
+#endif
 }
 
 void croak(const char *msg, const int console) {
@@ -205,7 +211,7 @@ int plist_pop(plist_t *list, void **aux) {
 		if (so_closed(id)) {
 			close(id);
 			if (t->aux)
-				free(t->aux);
+				free_auth(t->aux);
 		} else
 			ok = 1;
 
@@ -1027,6 +1033,9 @@ int from_base64(char *out, const char *in)
  */
 uint64_t getrandom64(void)
 {
+#ifdef CNTLM_EMBEDDED
+	return cntlm_embed_random();
+#else
 	uint64_t random_number = 0;
 	int success = 0;
 
@@ -1088,6 +1097,7 @@ uint64_t getrandom64(void)
 #endif
 
 	return random_number;
+#endif
 }
 
 /**

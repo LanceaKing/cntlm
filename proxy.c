@@ -24,6 +24,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <syslog.h>
+#include <errno.h>
+#include <ctype.h>
 
 #include "proxy.h"
 #include "globals.h"
@@ -44,7 +46,7 @@ enum proxy_type_t { DIRECT, PROXY };
 
 typedef struct {
 	enum proxy_type_t type;
-	char hostname[64];
+	char hostname[256];
 	int port;
 	struct auth_s creds;
 	struct addrinfo *addresses;
@@ -62,7 +64,7 @@ struct proxylist_s {
 typedef struct paclist_s *paclist_t;
 typedef const struct paclist_s *paclist_const_t;
 struct paclist_s {
-	const char *pacstr;
+	char *pacstr;
 	struct proxylist_s *proxylist;
 	unsigned long proxycurr;
 	int count;
@@ -176,7 +178,8 @@ void proxylist_free(proxylist_t list, int free_proxy) {
 		proxylist_t t = list->next;
 		if (free_proxy) {
 			proxy_t *proxy = list->proxy;
-			freeaddrinfo(proxy->addresses);
+			if (proxy->addresses) freeaddrinfo(proxy->addresses);
+			compat_memset_s(&proxy->creds, sizeof(proxy->creds), 0, sizeof(proxy->creds));
 			free(proxy);
 		}
 		free(list);
@@ -189,47 +192,33 @@ void proxylist_free(proxylist_t list, int free_proxy) {
  * Parse proxy parameter and add it to the global list.
  */
 int parent_add(const char *parent, int port) {
-	char *spec;
-	char *tmp;
-	proxy_t *proxy;
-
-	/*
-	 * Check format and parse it.
-	 */
-	spec = strdup(parent);
-	const char *q = strrchr(spec, ':');
-	if (q != NULL || port) {
-		int p;
-		p = (q != NULL) ? (int)(q - spec) : (int)strlen(spec);
-
-		if(spec[0] == '[' && spec[p-1] == ']') {
-			tmp = substr(spec, 1, p-2);
-		} else {
-			tmp = substr(spec, 0, p);
-		}
-
-		if (q != NULL)
-			port = atoi(spec+p+1);
-
-		if (!port) {
-			syslog(LOG_ERR, "Invalid port in proxy address %s\n", spec);
-			myexit(1);
-		}
+	if (!parent || !*parent) return 0;
+	const char *host = parent, *end = NULL, *port_text = NULL;
+	if (*host == '[') {
+		end = strchr(++host, ']');
+		if (!end || (end[1] && end[1] != ':')) return 0;
+		if (end[1] == ':') port_text = end + 2;
 	} else {
-		syslog(LOG_ERR, "Port not found in proxy address %s\n", spec);
-		myexit(1);
+		end = strrchr(host, ':');
+		if (end) port_text = end + 1;
+		else end = host + strlen(host);
 	}
-
-	proxy = (proxy_t *)zmalloc(sizeof(proxy_t));
+	if (end == host || (size_t)(end - host) >= sizeof(((proxy_t *)0)->hostname) ||
+	    strcspn(host, " \t\r\n") < (size_t)(end - host)) return 0;
+	if (port_text) {
+		char *tail;
+		if (!*port_text || strspn(port_text, "0123456789") != strlen(port_text)) return 0;
+		errno = 0;
+		long parsed = strtol(port_text, &tail, 10);
+		if (*tail || errno || parsed < 1 || parsed > 65535) return 0;
+		port = (int)parsed;
+	}
+	if (port < 1 || port > 65535) return 0;
+	proxy_t *proxy = zmalloc(sizeof(*proxy));
+	memcpy(proxy->hostname, host, end - host);
 	proxy->type = PROXY;
-	strlcpy(proxy->hostname, tmp, sizeof(proxy->hostname));
 	proxy->port = port;
-	proxy->resolved = 0;
-	proxy->addresses = NULL;
 	parent_list = proxylist_add(parent_list, ++parent_count, proxy);
-
-	free(spec);
-	free(tmp);
 	return parent_count;
 }
 
@@ -246,6 +235,10 @@ int parent_available(void) {
 void parent_free(void) {
 	paclist_free(pac_list);
 	proxylist_free(parent_list, 1);
+	pac_list = NULL;
+	parent_list = NULL;
+	parent_curr = 0;
+	parent_count = 0;
 }
 
 /*
@@ -254,102 +247,35 @@ void parent_free(void) {
  * TODO: Harden against malformed pacp_str.
  */
 paclist_t paclist_create(const char *pacp_str) {
-	paclist_t tmp;
-	proxylist_t plist = NULL;
-	int plist_count = 0;
-	char *pacp_tmp = NULL;
-	char *pacp_start = NULL;
-	char *cur_proxy = NULL;
-
-	if (pacp_str == NULL) {
-		return NULL;
-	}
-
-	/* Make a copy of shared PAC string pacp_str (coming
-	 * from pac) to avoid manipulation by strsep.
-	 */
-	pacp_start = strdup(pacp_str);
-	pacp_tmp = pacp_start; // save the pointer to this buffer so we can free it
-
-	cur_proxy = strsep(&pacp_tmp, ";");
-
-	if (debug)
-		printf("Parsed PAC Proxies:\n");
-
-	while (cur_proxy != NULL) {
-		enum proxy_type_t type = DIRECT; // default is DIRECT
-		char *type_str = NULL;
-		char *hostname = NULL;
-		char *port = NULL;
-		proxy_t *proxy;
-
-		/* skip whitespace after semicolon */
-		if (*cur_proxy == ' ')
-			cur_proxy = cur_proxy + 1;
-
-		type_str = strsep(&cur_proxy, " ");
-		if (strcmp(type_str, "PROXY") == 0) {
-			type = PROXY; // TODO: support more types
-			hostname = strsep(&cur_proxy, ":");
-			port = cur_proxy; // last token is always the port
+	if (!pacp_str || !*pacp_str || strlen(pacp_str) > 8192) return NULL;
+	char *copy = strdup(pacp_str), *save = NULL;
+	paclist_t result = zmalloc(sizeof(*result));
+	for (char *item = strtok_r(copy, ";", &save); item; item = strtok_r(NULL, ";", &save)) {
+		while (isspace((unsigned char)*item)) ++item;
+		trimr(item);
+		if (result->count >= 64) break;
+		pthread_mutex_lock(&parent_mtx);
+		proxy_t *proxy = NULL;
+		unsigned long key = 0;
+		if (!strcmp(item, "DIRECT")) {
+			proxy = zmalloc(sizeof(*proxy));
+			proxy->type = DIRECT;
+			key = ++parent_count;
+			parent_list = proxylist_add(parent_list, key, proxy);
+		} else if (!strncmp(item, "PROXY ", 6) && parent_add(item + 6, 0)) {
+			key = parent_count;
+			proxy = proxylist_get(parent_list, key);
 		}
-
-		if (debug) {
-			if (type != DIRECT) {
-				printf("   %s %s %s\n", type_str, hostname, port);
-			} else {
-				printf("   %s\n", type_str);
-			}
+		if (proxy) {
+			result->proxylist = proxylist_add(result->proxylist, key, proxy);
+			++result->count;
 		}
-
-		proxylist_t p = parent_list;
-		if (type == PROXY) {
-			int iport = atoi(port);
-			while (p != NULL && !(p->proxy->type == type && p->proxy->port == iport && !strcmp(p->proxy->hostname, hostname)))
-					p = p->next;
-			if (p == NULL) {
-				pthread_mutex_lock(&parent_mtx);
-				parent_add(hostname, iport);
-				proxy = proxylist_get(parent_list, parent_count);
-				plist = proxylist_add(plist, parent_count, proxy);
-				pthread_mutex_unlock(&parent_mtx);
-			}
-		} else { // type == DIRECT
-			while (p != NULL && p->proxy->type != type)
-				p = p->next;
-			if (p == NULL) {
-				proxy = (proxy_t *)zmalloc(sizeof(proxy_t));
-				proxy->type = DIRECT;
-				
-				pthread_mutex_lock(&parent_mtx);
-				++parent_count;
-				parent_list = proxylist_add(parent_list, parent_count, proxy);
-				plist = proxylist_add(plist, parent_count, proxy);
-				pthread_mutex_unlock(&parent_mtx);
-			}
-		}
-		if (p != NULL)
-			plist = proxylist_add(plist, p->key, p->proxy);
-
-		++plist_count;
-		cur_proxy = strsep(&pacp_tmp, ";"); /* get next proxy */
+		pthread_mutex_unlock(&parent_mtx);
 	}
-
-	if (debug) {
-		printf("Created PAC list with %d item(s):\n", plist_count);
-		proxylist_dump(plist);
-	}
-
-	free(pacp_start);
-
-	tmp = zmalloc(sizeof(struct paclist_s));
-	tmp->pacstr = pacp_str;
-	tmp->proxylist = plist;
-	tmp->proxycurr = 0;
-	tmp->count = plist_count;
-	tmp->next = NULL;
-
-	return tmp;
+	free(copy);
+	if (!result->count) { free(result); return NULL; }
+	result->pacstr = strdup(pacp_str);
+	return result;
 }
 
 /*
@@ -360,6 +286,7 @@ paclist_t paclist_create(const char *pacp_str) {
 paclist_t paclist_get(const char *pacp_str) {
 	paclist_t tmp;
 	paclist_t p = pac_list;
+	if (!pacp_str) return NULL;
 
 	while (p) {
 		if (strcmp(pacp_str, p->pacstr) == 0) {
@@ -371,6 +298,7 @@ paclist_t paclist_get(const char *pacp_str) {
 	}
 
 	tmp = paclist_create(pacp_str);
+	if (!tmp) return NULL;
 
 	if (pac_list == NULL) {
 		pac_list = tmp;
@@ -394,6 +322,7 @@ void paclist_free(paclist_t paclist) {
 	while (paclist) {
 		paclist_t t = paclist->next;
 		proxylist_free(paclist->proxylist, 0);
+		free(paclist->pacstr);
 		free(paclist);
 		paclist = t;
 	}
@@ -428,12 +357,14 @@ int proxy_connect(struct auth_s *credentials, const char* url, const char* hostn
 		 */
 		pthread_mutex_lock(&pac_mtx);
 		pacp_str = pac_find_proxy(url, hostname);
-		pthread_mutex_unlock(&pac_mtx);
-
 		paclist = paclist_get(pacp_str);
-		proxylist = paclist->proxylist;
-		proxycurr = paclist->proxycurr;
-		proxycount = paclist->count;
+		if (paclist) {
+			proxylist = paclist->proxylist;
+			proxycurr = paclist->proxycurr;
+			proxycount = paclist->count;
+		}
+		pthread_mutex_unlock(&pac_mtx);
+		if (!paclist) return -1;
 	} else {
 		proxylist = parent_list;
 		proxycurr = parent_curr;
@@ -465,7 +396,7 @@ int proxy_connect(struct auth_s *credentials, const char* url, const char* hostn
 
 		i = -1;
 		if (proxy && proxy->resolved != 0)
-			i = so_connect(proxy->addresses);
+			i = so_connect_named(proxy->addresses, proxy->hostname);
 
 		/*
 		 * Resolve or connect failed?
@@ -497,9 +428,10 @@ int proxy_connect(struct auth_s *credentials, const char* url, const char* hostn
 		while (list) {
 			plist_const_t tmp = list->next;
 			close(list->key);
+			if (list->aux) compat_memset_s(list->aux, sizeof(struct auth_s), 0, sizeof(struct auth_s));
 			list = tmp;
 		}
-		plist_free(connection_list);
+		connection_list = plist_free(connection_list);
 		pthread_mutex_unlock(&connection_mtx);
 
 		pthread_mutex_lock(&parent_mtx);
@@ -529,7 +461,7 @@ int proxy_connect(struct auth_s *credentials, const char* url, const char* hostn
  * Caller must init & free "request" and "response" (if supplied)
  *
  */
-int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct auth_s *credentials) {
+static int proxy_authenticate_once(int *sd, rr_data_t request, rr_data_t response, struct auth_s *credentials) {
 	char *tmp;
 	char *buf;
 	char *challenge;
@@ -540,6 +472,9 @@ int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct au
 	int rc = 0;
 	size_t bufsize = BUFSIZE;
 	buf = zmalloc(bufsize);
+#ifdef CNTLM_EMBEDDED
+	cntlm_io_auth_timeout(*sd, 10);
+#endif
 
 #if config_gss == 1
 	if(g_creds->haskrb && acquire_kerberos_token(curr_proxy->hostname, credentials, &buf, &bufsize)) {
@@ -592,13 +527,16 @@ int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct au
 	/*
 	 * For broken ISA's that don't accept HEAD in auth request
 	 */
-	if (HEAD(request)) {
+	/* Authenticate using a bodyless probe; submit the business request once. */
+	if (!CONNECT(request)) {
 		free(auth->method);
-		auth->method = strdup("GET");
+		auth->method = strdup("OPTIONS");
+		pretend407 = 1;
 	}
 
 	auth->headers = hlist_mod(auth->headers, "Content-Length", "0", 1);
 	auth->headers = hlist_del(auth->headers, "Transfer-Encoding");
+	auth->headers = hlist_del(auth->headers, "Expect");
 
 	if (debug) {
 		printf("\nSending PROXY auth request...\n");
@@ -646,7 +584,19 @@ int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct au
 			*sd = -1;
 			goto bailout;
 		}
-		tmp = hlist_get(auth->headers, "Proxy-Authenticate");
+		/* NTLM Type3 may only follow Type1/2 on the same transport. */
+		if (so_closed(*sd) || hlist_subcmp(auth->headers, "Connection", "close") ||
+		    hlist_subcmp(auth->headers, "Proxy-Connection", "close")) {
+			close(*sd); *sd = -1; rc = -2; goto bailout;
+		}
+		tmp = NULL;
+		for (hlist_t item = auth->headers; item; item = item->next) {
+			if (strcasecmp(item->key, "Proxy-Authenticate")) continue;
+			if (!strncasecmp(item->value, "NTLM ", 5)) { tmp = item->value; break; }
+#if config_gss == 1
+			if (!strncasecmp(item->value, "NEGOTIATE", 9)) tmp = item->value;
+#endif
+		}
 
 		if (tmp) {
 #if config_gss == 1
@@ -660,10 +610,12 @@ int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct au
 #endif
 				challenge = zmalloc(strlen(tmp) + 5 + 1);
 				len = from_base64(challenge, tmp + 5);
-				if (len > NTLM_CHALLENGE_MIN) {
+				if (len >= 32) {
 					tmp = NULL;
 					len = ntlm_response(&tmp, challenge, len, credentials);
 					if (len > 0) {
+						size_t needed = 5 + 4 * (((size_t)len + 2) / 3) + 1;
+						if (needed > bufsize) { free(buf); bufsize = needed; buf = zmalloc(bufsize); }
 						strlcpy(buf, "NTLM ", bufsize);
 						to_base64(MEM(buf, uint8_t, 5), MEM(tmp, uint8_t, 0), len, bufsize-5);
 						request->headers = hlist_mod(request->headers, "Proxy-Authorization", buf, 1);
@@ -692,6 +644,8 @@ int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct au
 #endif
 		} else {
 			syslog(LOG_WARNING, "No Proxy-Authenticate, NTLM/Negotiate not supported?\n");
+			rc = 0;
+			close(*sd); *sd = -1;
 		}
 	} else if (pretend407) {
 		if (debug)
@@ -709,22 +663,37 @@ int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct au
 	/*
 	 * Did proxy closed connection? It's our fault, reconnect for the caller.
 	 */
-	if (so_closed(*sd)) {
-		if (debug)
-			printf("Proxy closed on us, reconnect.\n");
-		close(*sd);
-		*sd = proxy_connect(credentials, request->url, request->hostname);
-		if (*sd < 0) {
-			rc = 0;
-			goto bailout;
-		}
+	if (rc && (so_closed(*sd) || hlist_subcmp(auth->headers, "Connection", "close") ||
+	    hlist_subcmp(auth->headers, "Proxy-Connection", "close"))) {
+		close(*sd); *sd = -1;
+		/* An unauthenticated OPTIONS reply may close its connection. No Type3
+		 * exists in this case, so the original request can use a fresh socket. */
+		if (pretend407) {
+			*sd = proxy_connect(NULL, request->url, request->hostname);
+			rc = *sd >= 0;
+		} else rc = 0;
 	}
 
 bailout:
+#ifdef CNTLM_EMBEDDED
+	if (*sd >= 0) cntlm_io_auth_timeout(*sd, 0);
+#endif
 	if (!response)
 		free_rr_data(&auth);
 
 	free(buf);
 
 	return rc;
+}
+
+/* A closed 407 restarts the entire handshake, with a bounded reconnect budget. */
+int proxy_authenticate(int *sd, rr_data_t request, rr_data_t response, struct auth_s *credentials) {
+	for (int attempt = 0; attempt < 3; ++attempt) {
+		if (*sd < 0) *sd = proxy_connect(NULL, request->url, request->hostname);
+		if (*sd < 0) return 0;
+		request->headers = hlist_del(request->headers, "Proxy-Authorization");
+		int result = proxy_authenticate_once(sd, request, response, credentials);
+		if (result != -2) return result;
+	}
+	return 0;
 }

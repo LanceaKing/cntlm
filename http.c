@@ -211,6 +211,14 @@ int headers_recv(int fd, rr_data_t data) {
 		}
 	} while (strlen(buf) != 0 && i > 0);
 
+	if (data->req && data->url[0] == '/') {
+		const char *authority = hlist_get(data->headers, "Host");
+		if (!authority || !*authority || strpbrk(authority, " \t\r\n")) { i = -6; goto bailout; }
+		free(host); host = strdup(authority);
+		char *absolute = zmalloc(strlen(authority) + strlen(data->url) + 8);
+		sprintf(absolute, "http://%s%s", authority, data->url);
+		free(data->url); data->url = absolute;
+	}
 	if (data->req) {
 		/*
 		 * Fix requests, make sure the Host: header is present
@@ -228,6 +236,7 @@ int headers_recv(int fd, rr_data_t data) {
 
 		if (host[0] == '[') {
 			tok = strchr(host, ']');
+			if (!tok) { i = -5; goto bailout; }
 			*tok = 0;
 			data->hostname = strdup(host+1);
 			if (*(tok+1) == ':') {
@@ -465,6 +474,9 @@ int chunked_data_send(int dst, int src) {
  * Used for bidirectional HTTP CONNECT connection.
  */
 int tunnel(int cd, int sd) {
+#ifdef CNTLM_EMBEDDED
+	return cntlm_io_tunnel(cd, sd);
+#else
 	struct pollfd fds[2];
 	int from;
 	int to;
@@ -508,6 +520,7 @@ int tunnel(int cd, int sd) {
 
 	free(buf);
 	return ret;
+#endif
 }
 
 /*

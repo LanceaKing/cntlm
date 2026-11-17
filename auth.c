@@ -59,6 +59,13 @@ struct auth_s *dup_auth(const struct auth_s *creds, int fullcopy) {
 	return copy_auth(tmp, creds, fullcopy);
 }
 
+void free_auth(struct auth_s *creds) {
+	if (creds) {
+		compat_memset_s(creds, sizeof(*creds), 0, sizeof(*creds));
+		free(creds);
+	}
+}
+
 void dump_auth(const struct auth_s *creds) {
 	char *tmp;
 

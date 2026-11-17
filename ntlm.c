@@ -290,18 +290,6 @@ int ntlm_request(char **dst, struct auth_s *creds) {
 	return 32+dlen+hlen;
 }
 
-static char *printuc(const char *src, size_t len) {
-	char *tmp;
-	size_t i;
-
-	tmp = zmalloc((len+1)/2 + 1);
-	for (i = 0; i < len/2; ++i) {
-		tmp[i] = src[i*2];
-	}
-
-	return tmp;
-}
-
 /*
 void dump(char *src, int len) {
 	int i, j;
@@ -343,60 +331,34 @@ int ntlm_response(char **dst, char *challenge, int challen, struct auth_s *creds
 	int lmlen = 0;
 	int ntlen = 0;
 
-	if (debug) {
-		printf("NTLM Challenge:\n");
-		tmp = printmem(MEM(challenge, char, 24), 8, 7);
-		printf("\tChallenge: %s (len: %d)\n", tmp, challen);
-		free(tmp);
-		printf("\t    Flags: 0x%X\n", U32LE(VAL(challenge, uint32_t, 20)));
-	}
-
-	if (challen >= NTLM_CHALLENGE_MIN) {
-		tbofs = tpos = U16LE(VAL(challenge, uint16_t, 44));
-		while (tpos+4 <= challen && (ttype = U16LE(VAL(challenge, uint16_t, tpos)))) {
-			tlen = U16LE(VAL(challenge, uint16_t, tpos+2));
-			if (tpos+4+tlen > challen)
+	*dst = NULL;
+	if (!challenge || challen < 32 || challen > 65535 ||
+	    memcmp(challenge, "NTLMSSP\0", 8) || U32LE(VAL(challenge, uint32_t, 8)) != 2)
+		return 0;
+	uint32_t target_offset = U32LE(VAL(challenge, uint32_t, 16));
+	uint16_t target_length = U16LE(VAL(challenge, uint16_t, 12));
+	if (target_length && (target_offset < 32 || target_offset > (uint32_t)challen ||
+	    target_length > (uint32_t)challen - target_offset)) return 0;
+	if (challen >= 48) {
+		uint32_t offset = U32LE(VAL(challenge, uint32_t, 44));
+		tblen = U16LE(VAL(challenge, uint16_t, 40));
+		if (tblen > NTLM_TARGETINFO_MAX || (tblen && (offset < 48 ||
+		    offset > (uint32_t)challen || (uint32_t)tblen > (uint32_t)challen - offset))) return 0;
+		tbofs = tblen ? (int)offset : 0;
+		for (tpos = tbofs; tblen && tpos < tbofs + tblen;) {
+			if (tbofs + tblen - tpos < 4) return 0;
+			ttype = U16LE(VAL(challenge, uint16_t, tpos));
+			tlen = U16LE(VAL(challenge, uint16_t, tpos + 2));
+			if (tlen > tbofs + tblen - tpos - 4) return 0;
+			tpos += 4 + tlen;
+			if (!ttype) {
+				if (tlen || tpos != tbofs + tblen) return 0;
 				break;
-
-			if (debug) {
-				switch (ttype) {
-					case 0x1:
-						printf("\t   Server: ");
-						break;
-					case 0x2:
-						printf("\tNT domain: ");
-						break;
-					case 0x3:
-						printf("\t     FQDN: ");
-						break;
-					case 0x4:
-						printf("\t   Domain: ");
-						break;
-					case 0x5:
-						printf("\t      TLD: ");
-						break;
-					default:
-						printf("\t      %3d: ", ttype);
-						break;
-				}
-				tmp = printuc(MEM(challenge, char, tpos+4), tlen);
-				printf("%s\n", tmp);
-				free(tmp);
 			}
-
-			tpos += 4+tlen;
-			tblen += 4+tlen;
 		}
-
-		if (tblen && ttype == 0)
-			tblen += 4;
-
-		if (tblen > NTLM_TARGETINFO_MAX)
-			return 0;
-
-		if (debug) {
-			printf("\t    TBofs: %d\n\t    TBlen: %d\n\t    ttype: %d\n", tbofs, tblen, ttype);
-		}
+		if (tblen && ttype != 0) return 0;
+	} else if (U32LE(VAL(challenge, uint32_t, 20)) & 0x00800000) {
+		return 0;
 	}
 
 	if (creds->hashntlm2) {

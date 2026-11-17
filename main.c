@@ -44,7 +44,7 @@
  * Some helping routines like linked list manipulation substr(), memory
  * allocation, NTLM authentication routines, etc.
  */
-#include "config/config.h"
+#include <config/config.h>
 #include "socket.h"
 #include "utils.h"
 #include "ntlm.h"
@@ -329,12 +329,14 @@ void *proxy_thread(void *thread_data) {
 	/*
 	 * Add ourself to the "threads to join" list.
 	 */
+#ifndef CNTLM_EMBEDDED
 	if (!serialize) {
 		pthread_mutex_lock(&threads_mtx);
 		pthread_t thread_id = pthread_self();
 		threads_list = plist_add(threads_list, (unsigned long)thread_id, NULL);
 		pthread_mutex_unlock(&threads_mtx);
 	}
+#endif
 
 	return NULL;
 }
@@ -368,12 +370,14 @@ void *tunnel_thread(void *thread_data) {
 	/*
 	 * Add ourself to the "threads to join" list.
 	 */
+#ifndef CNTLM_EMBEDDED
 	if (!serialize) {
 		pthread_mutex_lock(&threads_mtx);
 		pthread_t thread_id = pthread_self();
 		threads_list = plist_add(threads_list, (unsigned long)thread_id, NULL);
 		pthread_mutex_unlock(&threads_mtx);
 	}
+#endif
 
 	return NULL;
 }
@@ -415,7 +419,7 @@ void *socks5_thread(void *thread_data) {
 	bs = (unsigned char *)zmalloc(10);
 	thost = zmalloc(HOST_BUFSIZE);
 	tport = zmalloc(MINIBUF_SIZE);
-	r = read(cd, bs, 2);
+	r = so_read_exact(cd, bs, 2);
 	if (r != 2 || bs[0] != 5)
 		goto bailout;
 
@@ -424,7 +428,7 @@ void *socks5_thread(void *thread_data) {
 	 */
 	c = bs[1];
 	auths = (unsigned char *)zmalloc(c+1);
-	r = read(cd, auths, c);
+	r = so_read_exact(cd, auths, c);
 	if (r != c)
 		goto bailout;
 
@@ -475,7 +479,7 @@ void *socks5_thread(void *thread_data) {
 		/*
 		 * Check ver and read username len
 		 */
-		r = read(cd, bs, 2);
+		r = so_read_exact(cd, bs, 2);
 		if (r != 2) {
 			bs[0] = 1;
 			bs[1] = 0xFF;		/* Unsuccessful (not supported) */
@@ -488,12 +492,12 @@ void *socks5_thread(void *thread_data) {
 		 * Read username and pass len
 		 */
 		uname = zmalloc(c+1);
-		r = read(cd, uname, c+1);
+		r = so_read_exact(cd, uname, c+1);
 		if (r != c+1) {
 			free(uname);
 			goto bailout;
 		}
-		i = uname[c]; // PLEN
+		i = (unsigned char)uname[c]; // PLEN
 		uname[c] = 0;
 		c = i;
 
@@ -501,7 +505,7 @@ void *socks5_thread(void *thread_data) {
 		 * Read pass
 		 */
 		upass = zmalloc(c+1);
-		r = read(cd, upass, c);
+		r = so_read_exact(cd, upass, c);
 		if (r != c) {
 			free(upass);
 			free(uname);
@@ -541,7 +545,7 @@ void *socks5_thread(void *thread_data) {
 	/*
 	 * Read request type
 	 */
-	r = read(cd, bs, 4);
+	r = so_read_exact(cd, bs, 4);
 	if (r != 4)
 		goto bailout;
 
@@ -568,7 +572,7 @@ void *socks5_thread(void *thread_data) {
 	} else if (bs[3] == 3) {
 		uint8_t string_length;
 		ver = 2;			/* FQDN, get string length */
-		r = read(cd, &string_length, 1);
+		r = so_read_exact(cd, &string_length, 1);
 		if (r != 1)
 			goto bailout;
 		c = string_length;
@@ -576,7 +580,7 @@ void *socks5_thread(void *thread_data) {
 		goto bailout;
 
 	addr = (unsigned char *)zmalloc(c + 10 + 1);
-	r = read(cd, addr, c);
+	r = so_read_exact(cd, addr, c);
 	if (r != c)
 		goto bailout;
 	addr[c] = 0;
@@ -593,7 +597,7 @@ void *socks5_thread(void *thread_data) {
 	/*
 	 * Read port number and convert to host byte order int
 	 */
-	r = read(cd, &port, 2);
+	r = so_read_exact(cd, &port, 2);
 	if (r != 2)
 		goto bailout;
 
@@ -666,7 +670,7 @@ bailout:
 	if (bs)
 		free(bs);
 	if (tcreds)
-		free(tcreds);
+		free_auth(tcreds);
 	if (sd >= 0)
 		close(sd);
 	close(cd);
@@ -674,16 +678,19 @@ bailout:
 	/*
 	 * Add ourself to the "threads to join" list.
 	 */
+#ifndef CNTLM_EMBEDDED
 	if (!serialize) {
 		pthread_mutex_lock(&threads_mtx);
 		pthread_t thread_id = pthread_self();
 		threads_list = plist_add(threads_list, (unsigned long)thread_id, NULL);
 		pthread_mutex_unlock(&threads_mtx);
 	}
+#endif
 
 	return NULL;
 }
 
+#ifndef CNTLM_EMBEDDED
 int main(int argc, char **argv) {
 	char *tmp;
 	char *head;
@@ -1834,9 +1841,11 @@ bailout:
 	free(cuid);
 	free(cpidfile);
 	free(magic_detect);
-	free(g_creds);
+	free_auth(g_creds);
 
 	parent_free();
 
 	exit(0);
 }
+
+#endif /* !CNTLM_EMBEDDED */
