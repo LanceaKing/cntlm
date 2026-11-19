@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
+      SONAR_TOKEN_CONFIGURED: ${{ secrets.SONAR_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -26,6 +27,7 @@ jobs:
           ./configure
           build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} make
       - name: SonarQube Scan
+        if: env.SONAR_TOKEN_CONFIGURED == 'true'
         uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -35,3 +37,6 @@ jobs:
             -Dsonar.organization=${{ github.repository_owner }}
             -Dsonar.projectKey=${{ github.repository_owner }}_cntlm
             --define sonar.cfamily.compile-commands=${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json
+      - name: Report unconfigured SonarCloud scan
+        if: env.SONAR_TOKEN_CONFIGURED != 'true'
+        run: echo 'SonarCloud analysis skipped because SONAR_TOKEN is not configured.' >> "$GITHUB_STEP_SUMMARY"
