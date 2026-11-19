@@ -23,12 +23,12 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "globals.h"
 
-config_t config_open(const char *fname) {
-	FILE *fp = fopen(fname, "r");
+static config_t config_read(FILE *fp) {
 	if (!fp)
 		return NULL;
 	char *buf = zmalloc(BUFSIZE);
@@ -94,6 +94,22 @@ invalid:
 	fclose(fp);
 	config_close(cf);
 	return NULL;
+}
+
+config_t config_open(const char *fname) {
+	return config_read(fopen(fname, "r"));
+}
+
+config_t config_open_fd(int fd) {
+	int duplicate = dup(fd);
+	if (duplicate < 0)
+		return NULL;
+	FILE *fp = fdopen(duplicate, "r");
+	if (!fp) {
+		close(duplicate);
+		return NULL;
+	}
+	return config_read(fp);
 }
 
 void config_set(config_t cf, char *option, char *value) {

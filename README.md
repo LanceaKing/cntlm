@@ -1,5 +1,10 @@
 # Cntlm
 
+The `LanceaKing/cntlm` fork maintains ProxyDroid's embedded integration on
+`feat/redsocks-embedded`. ProxyDroid consumes it as a pinned Git submodule.
+Historical import provenance is in `VENDOR.json`; native integration and tests
+are in `EMBEDDING.md`. The upstream README and resource files follow.
+
 |Linux Build|AppVeyor Build (Cygwin)|Coverity Scan|Codacy Analysis|CodeQL|License|
 |:--:|:--:|:--:|:--:|:--:|:--:|
 |[![C/C++ CI](https://github.com/versat/cntlm/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/versat/cntlm/actions/workflows/c-cpp.yml)|[![AppVeyor Build status](https://ci.appveyor.com/api/projects/status/rthu5vjr0ksalyls/branch/master?svg=true)](https://ci.appveyor.com/project/versat/cntlm/branch/master)|[![Coverity Scan Build Status](https://img.shields.io/coverity/scan/15940.svg)](https://scan.coverity.com/projects/versat-cntlm)|[![Codacy Badge](https://app.codacy.com/project/badge/Grade/c506885b133047d38cd2c9dd4505320b)](https://app.codacy.com/gh/versat/cntlm/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)|[![CodeQL](https://github.com/versat/cntlm/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/versat/cntlm/actions/workflows/codeql-analysis.yml)|[![License](https://img.shields.io/badge/license-GPL2.0-blue.svg)](https://opensource.org/licenses/GPL-2.0)|

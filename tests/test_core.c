@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <netdb.h>
@@ -103,6 +104,30 @@ static void test_configuration(void) {
     char line[8192]; memset(line, 'x', sizeof(line)); line[sizeof(line)-1] = 0;
     CHECK(!parse(line));
 }
+static void test_descriptor_configuration(void) {
+    char path[] = "/tmp/cntlm-config-fd-XXXXXX";
+    int fd = mkstemp(path);
+    CHECK(fd >= 0 && unlink(path) == 0);
+    const char *text = "Username User\nPassword \"private\"\n";
+    CHECK(write(fd, text, strlen(text)) == (ssize_t)strlen(text));
+    CHECK(lseek(fd, 0, SEEK_SET) == 0);
+    config_t cf = config_open_fd(fd);
+    CHECK(cf && config_count(cf) == 2);
+    char *value = config_pop(cf, "Username");
+    CHECK(value && !strcmp(value, "User"));
+    free(value);
+    config_close(cf);
+    CHECK(fcntl(fd, F_GETFD) >= 0);
+
+    CHECK(ftruncate(fd, 0) == 0 && lseek(fd, 0, SEEK_SET) == 0);
+    text = "Password \"unterminated";
+    CHECK(write(fd, text, strlen(text)) == (ssize_t)strlen(text));
+    CHECK(lseek(fd, 0, SEEK_SET) == 0);
+    CHECK(!config_open_fd(fd));
+    CHECK(fcntl(fd, F_GETFD) >= 0);
+    close(fd);
+    CHECK(!config_open_fd(-1));
+}
 static void test_parent_reset(void) {
     for (int i = 0; i < 100; ++i) {
         CHECK(!parent_available());
@@ -151,7 +176,7 @@ static void test_pac_empty_storage(void) {
     }
 }
 int main(void) {
-    test_des_vector(); test_challenge_bounds(); test_configuration(); test_parent_reset(); test_pac_errors(); test_pac_empty_storage();
+    test_des_vector(); test_challenge_bounds(); test_configuration(); test_descriptor_configuration(); test_parent_reset(); test_pac_errors(); test_pac_empty_storage();
     puts("cntlm embedded core regressions passed");
     return 0;
 }

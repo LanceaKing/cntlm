@@ -1,0 +1,12 @@
+{
+  "name": "duktape",
+  "version": "2.7.0",
+  "upstream": "https://github.com/svaarala/duktape",
+  "upstream_commit": "03d4d728f8365021de6955c649e6dcd05dcca99f",
+  "imported_from": {
+    "component": "cntlm",
+    "commit": "07ba4eca9e17ec1fe0f9b53dc9f8bce64f2992cc",
+    "path": "duktape"
+  },
+  "notes": "Header identifies a dirty upstream snapshot. Includes fork PAC/UBSan repairs; not an unmodified upstream release."
+}

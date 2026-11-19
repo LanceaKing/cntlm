@@ -54,3 +54,18 @@ jobs:
           name: cntlm-core-${{ matrix.compiler }}
           retention-days: 7
           path: test-results/*.xml
+
+  macos-core:
+    name: macOS / strict C99 embedded core
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build and test the portable embedded target
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_EXTENSIONS=OFF -DCNTLM_BUILD_TESTS=ON
+          cmake --build build --parallel 4
+          ctest --test-dir build --output-on-failure

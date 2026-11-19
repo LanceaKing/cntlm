@@ -34,6 +34,8 @@ struct config_s {
 };
 
 extern config_t config_open(const char *fname);
+/* Read at the current offset and leave the caller's descriptor open. */
+extern config_t config_open_fd(int fd);
 extern void config_set(config_t cf, char *option, char *value);
 extern char *config_pop(config_t cf, const char *option);
 extern int config_count(config_t cf);
