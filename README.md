@@ -1,7 +1,7 @@
 # Cntlm
 
 The `LanceaKing/cntlm` fork maintains ProxyDroid's embedded integration on
-`feat/redsocks-embedded`. ProxyDroid consumes it as a pinned Git submodule.
+`master`. ProxyDroid consumes it as a pinned Git submodule.
 Historical import provenance is in `VENDOR.json`; native integration and tests
 are in `EMBEDDING.md`. The upstream README and resource files follow.
 

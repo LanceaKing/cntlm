@@ -4,7 +4,7 @@ The upstream stable baseline is `versat/cntlm` 0.94.1, tag commit
 `8612658b0bd1facae7dfe6362e35649eb19992f8`. The fork starts from upstream
 master `678d30b8ab4b0b2e3fb89a43bbeedd42d385e5f7`; its only differences from
 that release are upstream CI updates (checked 2026-11-19).
-It is maintained in `LanceaKing/cntlm` on `feat/redsocks-embedded`; ProxyDroid
+It is maintained in `LanceaKing/cntlm` on `master`; ProxyDroid
 pins it as the `cpp/cntlm` Git submodule. See `VENDOR.json` for the historical
 import revision. No build-time source copy or
 patch application is required.
